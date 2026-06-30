@@ -30,8 +30,8 @@
 
         .poster-slider {
             display: flex;
-            overflow-x: auto; overflow-y: hidden;
-            scroll-behavior: smooth;
+            overflow-x: hidden;
+            overflow-y: hidden;
             white-space: nowrap;
             width: 100%;
             max-height: 150px;
@@ -199,7 +199,7 @@
     <div class="container">
         <div class="left-panel">
             <h1>CineMatch</h1>
-            <p>RAG-powered movie recommendations</p>
+            <p>Find your next favorite film — curated for the moment</p>
             <div id="posterContainer" class="poster-slider"></div>
         </div>
 
@@ -222,17 +222,21 @@
 
     <script>
         const API_BASE = window.location.origin;
+        const posterContainer = document.getElementById('posterContainer');
 
         window.onload = function () {
             const t = getTimeOfDay();
             setBackground(t);
             setGreeting(t);
             loadPosters();
-            startAutoScroll();
 
             document.getElementById('userInput').addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') submitQuery();
             });
+
+            // Pause on hover
+            posterContainer.addEventListener('mouseenter', stopAutoScroll);
+            posterContainer.addEventListener('mouseleave', startAutoScroll);
         };
 
         function getTimeOfDay() {
@@ -263,35 +267,70 @@
             fetch(`${API_BASE}/random_movies?num_movies=50`)
                 .then(r => r.json())
                 .then(data => {
-                    const c = document.getElementById('posterContainer');
-                    c.innerHTML = '';
-                    data.movies.forEach(m => {
-                        const card = document.createElement('div');
-                        card.className = 'left-movie-card';
-                        const img = document.createElement('img');
-                        img.src = m.poster_path;
-                        img.alt = m.title;
-                        img.onerror = () => {
-                            img.src = `${API_BASE}/poster/default_poster.jpg`;
-                        };
-                        card.appendChild(img);
-                        c.appendChild(card);
+                    posterContainer.innerHTML = '';
+
+                    // Render the movie list TWICE for seamless looping
+                    const renderOnce = () => {
+                        data.movies.forEach(m => {
+                            const card = document.createElement('div');
+                            card.className = 'left-movie-card';
+                            const img = document.createElement('img');
+                            img.src = m.poster_path;
+                            img.alt = m.title;
+                            img.onerror = () => {
+                                img.src = `${API_BASE}/poster/default_poster.jpg`;
+                            };
+                            card.appendChild(img);
+                            posterContainer.appendChild(card);
+                        });
+                    };
+                    renderOnce();
+                    renderOnce();
+
+                    // Wait for all images to load before measuring width & starting scroll
+                    const images = posterContainer.querySelectorAll('img');
+                    let loaded = 0;
+                    const tryStart = () => {
+                        loaded++;
+                        if (loaded === images.length) startAutoScroll();
+                    };
+                    images.forEach(img => {
+                        if (img.complete) {
+                            tryStart();
+                        } else {
+                            img.addEventListener('load', tryStart);
+                            img.addEventListener('error', tryStart);
+                        }
                     });
-                });
+                })
+                .catch(err => console.error('Error loading posters:', err));
         }
 
-        let autoScroll;
+        let scrollAnimationId = null;
+        let halfWidth = 0;
+
         function startAutoScroll() {
-            const c = document.getElementById('posterContainer');
-            autoScroll = setInterval(() => {
-                if (c.scrollLeft + c.clientWidth >= c.scrollWidth) {
-                    c.scrollTo({ left: 0, behavior: 'smooth' });
-                } else {
-                    c.scrollBy({ left: 2, behavior: 'smooth' });
+            cancelAnimationFrame(scrollAnimationId);
+
+            halfWidth = posterContainer.scrollWidth / 2;
+            if (halfWidth === 0) return;
+
+            const speed = 0.3; // 像素/帧,想多慢调多慢
+            let pos = posterContainer.scrollLeft; // 浮点累加器
+
+            function step() {
+                pos += speed;
+                if (pos >= halfWidth) {
+                    pos -= halfWidth;
                 }
-            }, 30);
-            c.addEventListener('mouseenter', () => clearInterval(autoScroll));
-            c.addEventListener('mouseleave', startAutoScroll);
+                posterContainer.scrollLeft = pos; // 浏览器内部取整,但 pos 保留小数
+                scrollAnimationId = requestAnimationFrame(step);
+            }
+            scrollAnimationId = requestAnimationFrame(step);
+        }
+
+        function stopAutoScroll() {
+            cancelAnimationFrame(scrollAnimationId);
         }
 
         // --- Conversation -----------------------------------------------
@@ -413,7 +452,7 @@
             t = t.replace(/^(the|a|an)\s+/, '');
             return t.trim();
         }
-        
+
         function buildMovieCard(m) {
             const card = document.createElement('div');
             card.className = 'right-movie-card';
