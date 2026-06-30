@@ -58,14 +58,15 @@ You'll need MovieLens-1M under `data/ml-1m/` —
 ground truth (a result counts as relevant if its genres overlap with
 the query's intended genre).
 
-| Metric | Value |
-|---|---|
-| recall@1 | 0.900 |
-| recall@5 | 0.900 |
-| recall@10 | 0.890 |
-| Retrieval latency mean / P95 | 375 ms / 1,132 ms |
-| End-to-end latency mean / P95 | 8.1 s / 11.4 s |
-| Cost per query | ~$0.0018 |
+| Metric                          | Value             |
+| ------------------------------- | ----------------- |
+| precision@1                     | 0.900             |
+| precision@5                     | 0.900             |
+| precision@10                    | 0.890             |
+| Retrieval latency mean / P95    | 346 ms / 1,304 ms |
+| End-to-end latency mean / P95   | 10.7 s / 18.3 s   |
+| Avg prompt / completion tokens  | 689 / 893         |
+| Cost per query                  | ~$0.00196         |
 
 
 ## Local MVP vs production

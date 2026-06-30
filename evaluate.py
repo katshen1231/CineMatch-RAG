@@ -2,9 +2,12 @@
 evaluate.py — Quantitative evaluation of the RAG pipeline.
 
 Metrics:
-    1. recall@k — heuristic: how well retrieval surfaces movies whose
-       genres overlap with the query's intent. Ground truth is the set
-       of movies sharing >=1 genre with the query's "intended genre".
+    1. precision@k — heuristic: among the top-K retrieved movies, what
+       fraction have genres overlapping with the query's intended genre.
+       We use precision rather than recall because for genre-based
+       queries, the relevant set in MovieLens-1M can contain hundreds
+       of movies, making recall@10 uninformatively small. Precision@k
+       better captures "ranking quality in what the user actually sees".
 
     2. latency  — wall time for the retrieval step and the full
        end-to-end pipeline (retrieval + LLM generation).
@@ -14,7 +17,8 @@ Metrics:
        gpt-5-mini list prices.
 
 This evaluation uses SYNTHETIC queries paired with a target genre.
-Full evaluation would require human-annotated relevance judgments —
+Full evaluation would require human-annotated relevance judgments or
+LLM-as-judge metrics (e.g. RAGAS faithfulness / answer-relevance) —
 this approximation is fast and captures coarse semantic alignment.
 """
 import time
@@ -47,12 +51,22 @@ EVAL_SET = [
 K_VALUES = [1, 5, 10]
 
 
-def recall_at_k(retrieved: list[dict], target_genre: str, k: int) -> float:
-    """Fraction of top-K results whose genres contain the target genre.
+def precision_at_k(retrieved: list[dict], target_genre: str, k: int) -> float:
+    """Fraction of top-K retrieved results whose genres contain the target genre.
 
-    Returns a value in [0, 1] — higher is better. Note this is precision-
-    flavored recall: among the K retrieved, how many were on-topic.
-    True recall would need to know the total relevant set size.
+    This is precision@k: among the K results we surface, how many are
+    on-topic. We use genre overlap as a heuristic proxy for topical
+    relevance — a result counts as a "hit" if its genres list contains
+    the query's intended genre.
+
+    Note on metric choice: we report precision rather than recall because
+    true recall@k = (hits in top K) / (total relevant in dataset). For
+    genre-based queries on MovieLens-1M the denominator can be in the
+    hundreds, making recall@10 small and uninformative. Precision@k
+    captures what users actually experience: ranking quality in the
+    top results.
+
+    Returns a value in [0, 1] — higher is better.
     """
     top_k = retrieved[:k]
     hits = sum(1 for m in top_k if target_genre in m["genres"])
@@ -60,8 +74,8 @@ def recall_at_k(retrieved: list[dict], target_genre: str, k: int) -> float:
 
 
 def evaluate_retrieval_only(retriever: MovieRetriever) -> dict:
-    """Measure retrieval recall@k and latency (no LLM call)."""
-    recalls = {k: [] for k in K_VALUES}
+    """Measure retrieval precision@k and latency (no LLM call)."""
+    precisions = {k: [] for k in K_VALUES}
     latencies = []
 
     for query, target_genre in EVAL_SET:
@@ -70,10 +84,10 @@ def evaluate_retrieval_only(retriever: MovieRetriever) -> dict:
         latencies.append((time.perf_counter() - t0) * 1000)  # ms
 
         for k in K_VALUES:
-            recalls[k].append(recall_at_k(retrieved, target_genre, k))
+            precisions[k].append(precision_at_k(retrieved, target_genre, k))
 
     return {
-        "recall_at_k": {k: statistics.mean(recalls[k]) for k in K_VALUES},
+        "precision_at_k": {k: statistics.mean(precisions[k]) for k in K_VALUES},
         "latency_ms_mean": statistics.mean(latencies),
         "latency_ms_p95":  sorted(latencies)[int(len(latencies) * 0.95)],
         "n_queries": len(EVAL_SET),
@@ -124,23 +138,23 @@ def main():
 
     print("\n[1/2] Retrieval-only metrics...")
     retr = evaluate_retrieval_only(retriever)
-    for k, v in retr["recall_at_k"].items():
-        print(f"      recall@{k:<2} = {v:.3f}")
+    for k, v in retr["precision_at_k"].items():
+        print(f"      precision@{k:<2} = {v:.3f}")
     print(f"      latency mean = {retr['latency_ms_mean']:.1f} ms")
     print(f"      latency p95  = {retr['latency_ms_p95']:.1f} ms")
 
     print("\n[2/2] End-to-end metrics (retrieval + LLM)...")
     e2e = evaluate_end_to_end(pipeline)
-    print(f"      latency mean         = {e2e['latency_ms_mean']:.1f} ms")
-    print(f"      latency p95          = {e2e['latency_ms_p95']:.1f} ms")
-    print(f"      prompt tokens mean   = {e2e['tokens_prompt_mean']}")
+    print(f"      latency mean           = {e2e['latency_ms_mean']:.1f} ms")
+    print(f"      latency p95            = {e2e['latency_ms_p95']:.1f} ms")
+    print(f"      prompt tokens mean     = {e2e['tokens_prompt_mean']}")
     print(f"      completion tokens mean = {e2e['tokens_completion_mean']}")
-    print(f"      cost per query       = ${e2e['cost_per_query_usd']:.5f}")
+    print(f"      cost per query         = ${e2e['cost_per_query_usd']:.5f}")
 
     print()
-    print("Summary (copy into README):")
+    print("Summary:")
     print("-" * 60)
-    print(f"  recall@10 = {retr['recall_at_k'][10]:.3f}  "
+    print(f"  precision@10 = {retr['precision_at_k'][10]:.3f}  "
           f"(heuristic: genre overlap on {len(EVAL_SET)} synthetic queries)")
     print(f"  retrieval latency P95 = {retr['latency_ms_p95']:.0f} ms")
     print(f"  end-to-end latency mean = {e2e['latency_ms_mean']:.0f} ms")
