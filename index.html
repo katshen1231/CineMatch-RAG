@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CineMatch - RAG Movie Recommendation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0; padding: 0;
+            display: flex; height: 100vh;
+            background-color: #f0f0f0;
+        }
+        .container { display: flex; flex: 1; overflow: hidden; }
+
+        /* LEFT: poster scroller */
+        .left-panel {
+            width: 53%;
+            background-color: #fff;
+            padding: 30px;
+            display: flex; flex-direction: column;
+            align-items: center;
+            padding-top: 100px;
+            text-align: center;
+            border-right: 1px solid #ddd;
+            overflow: hidden;
+        }
+        .left-panel h1 { margin-bottom: 10px; }
+        .left-panel p { margin-top: 5px; color: #666; }
+
+        .poster-slider {
+            display: flex;
+            overflow-x: auto; overflow-y: hidden;
+            scroll-behavior: smooth;
+            white-space: nowrap;
+            width: 100%;
+            max-height: 150px;
+            gap: 10px;
+            margin-top: 30px;
+        }
+        .poster-slider::-webkit-scrollbar { display: none; }
+        .left-movie-card {
+            flex-shrink: 0; width: 100px; height: 150px;
+            border-radius: 5px; overflow: hidden;
+        }
+        .left-movie-card img {
+            width: 100%; height: 100%; object-fit: cover;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        /* RIGHT: time-aware background + conversation */
+        .right-panel {
+            flex: 1; position: relative;
+            display: flex; flex-direction: column;
+            overflow-y: auto;
+            background-color: #333; color: white;
+        }
+        .right-panel::before {
+            content: "";
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            background-size: cover; background-position: center;
+            filter: blur(2px); opacity: 0.7;
+            z-index: 1;
+            transition: background-image 0.5s ease-in-out;
+        }
+
+        .right-content-wrapper {
+            position: relative; z-index: 2;
+            padding: 30px;
+            display: flex; flex-direction: column;
+            gap: 12px;
+            min-height: 100%;
+            box-sizing: border-box;
+        }
+
+        .greeting {
+            background: rgba(255,255,255,0.9);
+            color: #333;
+            padding: 15px 20px;
+            border-radius: 10px;
+            font-size: 16px;
+        }
+
+        .input-box {
+            display: flex; gap: 10px;
+            background-color: rgba(255,255,255,0.95);
+            padding: 15px; border-radius: 10px;
+            position: sticky;
+            bottom: 0;
+        }
+        .input-box input {
+            flex: 1; padding: 12px;
+            border: 1px solid #ddd; border-radius: 5px;
+            font-size: 1rem;
+        }
+        .input-box button {
+            padding: 12px 24px;
+            background-color: #007bff; color: white;
+            border: none; border-radius: 5px;
+            font-size: 1rem; cursor: pointer;
+        }
+        .input-box button:hover { background-color: #0056b3; }
+        .input-box button:disabled { background-color: #888; cursor: wait; }
+
+        /* Conversation turns */
+        .user-turn {
+            background: rgba(0,123,255,0.85);
+            color: white;
+            align-self: flex-end;
+            max-width: 75%;
+            margin-left: auto;
+            padding: 10px 16px;
+            border-radius: 18px 18px 4px 18px;
+        }
+        .conversation-turn {
+            background: rgba(255,255,255,0.92);
+            color: #222;
+            padding: 15px 20px;
+            border-radius: 10px;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+        .conversation-turn strong { color: #007bff; }
+
+        .turn-label {
+            font-size: 11px;
+            color: #999;
+            margin-top: 10px;
+            font-family: monospace;
+            text-transform: uppercase;
+        }
+
+        .retrieved-label {
+            color: rgba(255,255,255,0.95);
+            font-size: 12px;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+            margin: 5px 0;
+            font-family: monospace;
+        }
+
+        /* Movie cards */
+        .right-movie-card {
+            display: flex; flex-direction: row;
+            gap: 15px; padding: 10px;
+            border-radius: 8px;
+            background-color: rgba(255,255,255,0.88);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            align-items: stretch;
+        }
+        .right-movie-card img {
+            flex-shrink: 0;
+            width: 90px; height: 130px;
+            object-fit: cover; border-radius: 4px;
+        }
+        .right-movie-info {
+            flex: 1; min-width: 0;
+            display: flex; flex-direction: column;
+            justify-content: space-between;
+        }
+        .right-movie-info h3 {
+            font-size: 14px; font-weight: bold;
+            margin: 0 0 5px 0; color: #222;
+        }
+        .right-movie-info .genres {
+            font-size: 12px; color: #666; margin: 0 0 5px 0;
+        }
+        .right-movie-info .intro {
+            font-size: 12px; color: #555;
+            margin: 0 0 5px 0; line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .right-movie-info .score {
+            font-size: 11px; color: #999;
+            font-family: monospace; margin: 0;
+        }
+
+        .reset-btn {
+            background: transparent;
+            color: rgba(255,255,255,0.7);
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 6px 12px;
+            border-radius: 5px;
+            font-size: 12px;
+            cursor: pointer;
+            align-self: flex-end;
+        }
+        .reset-btn:hover {
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="left-panel">
+            <h1>CineMatch</h1>
+            <p>RAG-powered movie recommendations</p>
+            <div id="posterContainer" class="poster-slider"></div>
+        </div>
+
+        <div class="right-panel" id="rightPanel">
+            <div class="right-content-wrapper">
+                <div id="greeting" class="greeting"></div>
+
+                <div id="conversation" style="display: flex; flex-direction: column; gap: 12px;"></div>
+
+                <div class="input-box">
+                    <input type="text" id="userInput"
+                           placeholder="Tell me what you want to watch (or ask for variations)...">
+                    <button id="submitBtn" onclick="submitQuery()">Send</button>
+                </div>
+
+                <button class="reset-btn" onclick="resetConversation()">New conversation</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+
+        window.onload = function () {
+            const t = getTimeOfDay();
+            setBackground(t);
+            setGreeting(t);
+            loadPosters();
+            startAutoScroll();
+
+            document.getElementById('userInput').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') submitQuery();
+            });
+        };
+
+        function getTimeOfDay() {
+            const h = new Date().getHours();
+            if (h >= 5 && h < 12) return 'morning';
+            if (h >= 12 && h < 18) return 'afternoon';
+            if (h >= 18 && h < 22) return 'evening';
+            return 'night';
+        }
+
+        function setBackground(t) {
+            document.getElementById('rightPanel').style.backgroundImage =
+                `url("./${t}.jpg")`;
+        }
+
+        function setGreeting(t) {
+            const map = {
+                morning:   'Good morning. What kind of movie do you want today?',
+                afternoon: 'Good afternoon. Tell me what kind of film you want.',
+                evening:   'Good evening. What kind of movie tonight?',
+                night:     'Late night vibes. What are you craving?',
+            };
+            document.getElementById('greeting').textContent = map[t];
+        }
+
+        // --- Poster scroller ---------------------------------------------
+        function loadPosters() {
+            fetch(`${API_BASE}/random_movies?num_movies=50`)
+                .then(r => r.json())
+                .then(data => {
+                    const c = document.getElementById('posterContainer');
+                    c.innerHTML = '';
+                    data.movies.forEach(m => {
+                        const card = document.createElement('div');
+                        card.className = 'left-movie-card';
+                        const img = document.createElement('img');
+                        img.src = m.poster_path;
+                        img.alt = m.title;
+                        img.onerror = () => {
+                            img.src = `${API_BASE}/poster/default_poster.jpg`;
+                        };
+                        card.appendChild(img);
+                        c.appendChild(card);
+                    });
+                });
+        }
+
+        let autoScroll;
+        function startAutoScroll() {
+            const c = document.getElementById('posterContainer');
+            autoScroll = setInterval(() => {
+                if (c.scrollLeft + c.clientWidth >= c.scrollWidth) {
+                    c.scrollTo({ left: 0, behavior: 'smooth' });
+                } else {
+                    c.scrollBy({ left: 2, behavior: 'smooth' });
+                }
+            }, 30);
+            c.addEventListener('mouseenter', () => clearInterval(autoScroll));
+            c.addEventListener('mouseleave', startAutoScroll);
+        }
+
+        // --- Conversation -----------------------------------------------
+        function submitQuery() {
+            const input = document.getElementById('userInput');
+            const btn   = document.getElementById('submitBtn');
+            const query = input.value.trim();
+            if (!query) return;
+
+            appendUserTurn(query);
+            input.value = '';
+
+            btn.disabled = true;
+            btn.textContent = 'Thinking...';
+
+            const placeholder = appendAssistantTurn(
+                '<em>Retrieving and generating...</em>'
+            );
+
+            fetch(`${API_BASE}/recommend`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query }),
+            })
+            .then(r => r.json())
+            .then(data => {
+                placeholder.remove();
+                renderAssistantTurn(data);
+            })
+            .catch(err => {
+                placeholder.remove();
+                appendAssistantTurn(`Error: ${err.message}`);
+            })
+            .finally(() => {
+                btn.disabled = false;
+                btn.textContent = 'Send';
+                setTimeout(scrollToBottom, 50);
+            });
+        }
+
+        function appendUserTurn(text) {
+            const turn = document.createElement('div');
+            turn.className = 'user-turn';
+            turn.textContent = text;
+            document.getElementById('conversation').appendChild(turn);
+        }
+
+        function appendAssistantTurn(html) {
+            const wrap = document.createElement('div');
+            wrap.className = 'conversation-turn';
+            wrap.innerHTML = html;
+            document.getElementById('conversation').appendChild(wrap);
+            return wrap;
+        }
+
+        function renderAssistantTurn(data) {
+            // 1. LLM-generated reasoning text
+            const answerHtml = data.answer
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n/g, '<br>');
+
+            const usageHtml = data.usage
+                ? `<div class="turn-label">tokens: prompt=${data.usage.prompt_tokens} ` +
+                  `completion=${data.usage.completion_tokens}</div>`
+                : '';
+
+            appendAssistantTurn(answerHtml + usageHtml);
+
+            // 2. Movie cards for LLM's picks (parsed from **Title** pattern)
+            const picks = extractLLMPicks(data.answer, data.retrieved);
+            if (picks.length) {
+                const label = document.createElement('div');
+                label.className = 'retrieved-label';
+                label.textContent = 'LLM picks (grounded in retrieval):';
+                document.getElementById('conversation').appendChild(label);
+
+                picks.forEach(m => {
+                    document.getElementById('conversation').appendChild(buildMovieCard(m));
+                });
+            }
+        }
+
+        // Parse LLM output for "**Title**" markers, match back to retrieved metadata
+        function extractLLMPicks(answerText, retrieved) {
+            const picks = [];
+            const seen = new Set();
+            const re = /\*\*(.+?)\*\*/g;
+            let m;
+            while ((m = re.exec(answerText)) !== null) {
+                const raw = m[1].trim().replace(/:$/, '').trim();
+                const candidate = normalizeTitle(raw);
+
+                const movie = retrieved.find(r => {
+                    if (seen.has(r.movieId)) return false;
+                    return normalizeTitle(r.title) === candidate;
+                });
+                if (movie) {
+                    picks.push(movie);
+                    seen.add(movie.movieId);
+                }
+            }
+            return picks;
+        }
+
+        // Normalize a title for fuzzy matching:
+        //   "Dark Half, The (1993)" -> "dark half"
+        //   "The Dark Half (1993)"  -> "dark half"
+        //   "The Dark Half"         -> "dark half"
+        function normalizeTitle(title) {
+            let t = title.toLowerCase().trim();
+            // Strip trailing year " (1993)"
+            t = t.replace(/\s*\(\d{4}\)\s*$/, '');
+            // Handle "Foo, The" -> "the foo"
+            const articleMatch = t.match(/^(.+),\s*(the|a|an)$/);
+            if (articleMatch) {
+                t = `${articleMatch[2]} ${articleMatch[1]}`;
+            }
+            // Strip leading article so "the dark half" and "dark half" both work
+            t = t.replace(/^(the|a|an)\s+/, '');
+            return t.trim();
+        }
+        
+        function buildMovieCard(m) {
+            const card = document.createElement('div');
+            card.className = 'right-movie-card';
+
+            const img = document.createElement('img');
+            img.src = m.poster_path;
+            img.onerror = () => {
+                img.src = `${API_BASE}/poster/default_poster.jpg`;
+            };
+            card.appendChild(img);
+
+            const info = document.createElement('div');
+            info.className = 'right-movie-info';
+            info.innerHTML = `
+                <h3>${m.title}</h3>
+                <p class="genres">${m.genres}</p>
+                <p class="intro">${m.intro || ''}</p>
+                <p class="score">cosine: ${m.score.toFixed(3)}</p>
+            `;
+            card.appendChild(info);
+            return card;
+        }
+
+        function scrollToBottom() {
+            const panel = document.getElementById('rightPanel');
+            panel.scrollTop = panel.scrollHeight;
+        }
+
+        function resetConversation() {
+            if (!confirm('Start a new conversation? Current history will be cleared.')) return;
+            fetch(`${API_BASE}/reset`, { method: 'POST' })
+                .then(() => {
+                    document.getElementById('conversation').innerHTML = '';
+                });
+        }
+    </script>
+</body>
+</html>

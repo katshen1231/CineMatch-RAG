@@ -1,0 +1,8 @@
+﻿faiss-cpu
+openai>=1.50
+python-dotenv
+pandas
+numpy
+flask
+flask-cors
+tqdm
