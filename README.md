@@ -84,31 +84,6 @@ pipeline. That was a deliberate choice during the MVP; at ~3,000
 movies a cloud vector store would have been overkill (FAISS searches
 in under 10 ms), but designing for the migration kept the option open.
 
-## A few engineering notes
-
-**Why `IndexFlatIP` not `IndexFlatL2`?** OpenAI embeddings are
-L2-normalized, so inner product equals cosine similarity. L2 distance
-would be the wrong metric on normalized vectors.
-
-**Why batch embeddings 64 at a time?** The API call's latency is
-mostly network. Batching 3,000 inputs into ~47 calls vs 3,000 calls
-turns minutes of waiting into under a minute.
-
-**Why no SVD / collaborative filtering?** The legacy version of this
-project had SVD. I dropped it for the MVP because the UI takes free
-text with no user ID — SVD's value is using rating history, and
-without login there's nothing to use. Adding SVD as a candidate
-generation layer for logged-in users is the first item in future work.
-
-**A bug worth mentioning.** The LLM was supposed to pick 3 movies but
-the UI sometimes only showed 2. Turned out MovieLens stores titles in
-library style (`Dark Half, The`) and the LLM helpfully "corrected"
-them to natural grammar (`The Dark Half`) in its output, so my title
-matching missed them. Fixed with a normalization function (lowercase,
-strip year, un-invert articles). The deeper fix would be to use JSON
-mode and have the LLM return movie IDs directly — strings are a bad
-join key when one side is an LLM.
-
 ## Future work
 
 In rough priority order:
